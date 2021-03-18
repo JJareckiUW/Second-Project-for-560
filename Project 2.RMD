@@ -1,0 +1,310 @@
+---
+title: "Project 2"
+author: "Jakob Jarecki"
+date: "3/15/2021"
+output:
+  word_document: default
+  html_document: default
+---
+
+```{r setup, include=TRUE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r loading data and packages, include=TRUE}
+#Package which has dataset- BreastCancer
+require(mlbench)
+#frontload all packages for analysis
+library(caTools)   #Used to split data into training and test data
+library(caret)     #Used for training and plotting models
+library(mice)      #Used to remove NA value in dataset
+library(klaR)      #Used to implement naiveBayes classification algorithm
+library(e1071)     #Used to implement support vector machine classification
+library(rpart)     #Used to implement tree algorithm
+library(nnet)      #Used to implement neural net classifier
+library(randomForest) #Used to implement Random Forest classifier
+library(dplyr)     #Used in conversion of categorical data to numerical data
+library(hablar)    #Used in conversion from factors to integers
+library(adabag)    #used in ensemble techniques
+library(caretEnsemble)#used to make an ensemble algorithm/classifier
+#Load dataset
+data(BreastCancer)
+#Check load 
+head(BreastCancer)
+#Verify structure
+str(BreastCancer)
+```
+
+
+```{r data exploration, include=TRUE}
+summary(BreastCancer)
+#Correct NAs
+dataset_impute <- mice(BreastCancer[,2:10],  print = FALSE) #Removing NA values and ID(1st column) from dataset
+BreastCancer <- cbind(BreastCancer[,11, drop = FALSE], mice::complete(dataset_impute, 1)) #Adding Target class to the imputed dataset without NA
+
+```
+
+```{r split data,, include=TRUE}
+#Split data into a training set and a holdout set
+set.seed(123)#Sets a seed so the split it reproducible
+dt = sort(sample(nrow(BreastCancer), nrow(BreastCancer)*.6))#Selects 60% of rows
+train<-BreastCancer[dt,]#Moves 60% of all records into a training set
+test<-BreastCancer[-dt,]#Moves 40% of all records into a testing set
+```
+
+```{r support vector machine,, include=TRUE}
+#Implements the support vector model
+mysvm <- svm(Class ~ ., train)
+mysvm.pred <- predict(mysvm, train)
+#Build confusion matrix
+swvmtable<-confusionMatrix(mysvm.pred, reference = train$Class)
+#Begin new table for comparison
+key<- c('Recall', 'Precision', 'F1 Measure')
+SVMMethod<-c(swvmtable$byClass["Recall"],swvmtable$byClass["Precision"],swvmtable$byClass["F1"])
+```
+
+```{r naive bayes, include=TRUE}
+#Implements the naive bayes classifier
+mynb <- NaiveBayes(Class ~ ., train)
+mynb.pred <- predict(mynb,train)
+#Build confusion matrix
+NBtable<-confusionMatrix(mynb.pred$class, reference = train$Class)
+#Continue building rows for comparison table
+NBMethod<-c(NBtable$byClass["Recall"],NBtable$byClass["Precision"],NBtable$byClass["F1"])
+```
+
+```{r neuralnet, include=TRUE}
+mynnet <- nnet(Class ~ ., train, size=1)
+mynnet.pred <- predict(mynnet,train,type="class")
+#Build confusion matrix
+table(mynnet.pred,train$Class)
+#Manual calculation of scores
+TP=as.numeric("151")
+FN=as.numeric("2")
+FP=as.numeric("1")
+TN=as.numeric("265")
+NNPr=(TP/(TP+FP))
+NNR = (TP/(TP+FN))
+NNF = (2*NNPr*NNR)/(NNPr+NNR)
+#Continue building rows for comparison table
+NNMethod<-c(NNR,NNPr,NNF)
+```
+
+```{r decision trees, , include=TRUE}
+#implements decision tree classifier
+mytree <- rpart(Class ~ ., train)
+
+plot(mytree); text(mytree) #Plots decision trees
+summary(mytree)
+mytree.pred <- predict(mytree,train,type="class")
+#Build confusion matrix
+treetable<-confusionMatrix(mytree.pred, reference = train$Class)
+#Continue building rows for comparison table
+TreeMethod<-c(treetable$byClass["Recall"],treetable$byClass["Precision"],treetable$byClass["F1"])
+```
+
+
+```{r leave one out, include=TRUE}
+#Implements Leave One Out Cross Validation Model
+ans <- numeric(length(train[,1]))
+for (i in 1:length(train[,1])) {
+  mytree <- rpart(Class~ ., train[-i,])
+  mytree.pred <- predict(mytree,train[i,],type="class")
+  ans[i] <- mytree.pred
+}
+ans <- factor(ans,labels=levels(train$Class))
+#Build confusion matrix
+loocvtable<-confusionMatrix(ans, reference = train$Class)
+loocvtable
+#Continue building rows for comparison table
+loovcMethod<-c(loocvtable$byClass["Recall"],loocvtable$byClass["Precision"],loocvtable$byClass["F1"])
+```
+
+```{r QDA, , include=TRUE}
+#Create new set to convert to numeric functions
+df<-train
+#Use convert to force the class to a numerical
+df %>% convert(num(Class:Mitoses))
+#String all variables as integer
+df$Cl.thickness<-as.integer(df$Cl.thickness)
+df$Class<-as.integer(df$Class)
+df$Mitoses<-as.integer(df$Mitoses)
+df$Cell.size<-as.integer(df$Cell.size)
+df$Cell.shape<-as.integer(df$Cell.shape)
+df$Marg.adhesion<-as.integer(df$Marg.adhesion)
+df$Epith.c.size<-as.integer(df$Epith.c.size)
+df$Bare.nuclei<-as.integer(df$Bare.nuclei)
+df$Bl.cromatin<-as.integer(df$Bl.cromatin)
+df$Normal.nucleoli<-as.integer(df$Normal.nucleoli)
+#Implements the QDA method
+myqda <- qda(Class ~ ., data=df)
+myqda.pred <- predict(myqda, df)
+head(myqda.pred)
+#Build confusion matrix
+table(myqda.pred$class,df$Class)
+#Manual calculation of scores
+#table was built manually and scores can be calculated manually
+TP2=as.numeric("149")
+FN2=as.numeric("2")
+FP2=as.numeric("13")
+TN2=as.numeric("254")
+QDAP =(TP2/(TP2+FP2))
+QDAR = (TP2/(TP2+FN2))
+QDAF = (2*QDAP*QDAR)/(QDAP+QDAR)
+#Continue building rows for comparison table
+QDAMethod<-c(QDAR,QDAP,QDAF)
+```
+
+```{r regular discriminat analysis, include=TRUE}
+#Implements the RDA method
+myrda <- rda(Class ~ ., train)
+myrda.pred <- predict(myrda, train)
+#Build Confusion Matrix
+rdatable<-confusionMatrix(myrda.pred$class, reference = train$Class)
+#Continue building rows for comparison table
+RDAMethod<-c(rdatable$byClass["Recall"],rdatable$byClass["Precision"],rdatable$byClass["F1"])
+```
+
+```{r randomforest method, , include=TRUE}
+#Implements the randomforest method
+myrf <- randomForest(Class ~ .,train)
+myrf.pred <- predict(myrf, train)
+#Build Confusion Matrix
+rftable<-confusionMatrix(myrf.pred, reference = train$Class)
+#Continue building rows for comparison table
+RFMethod<-c(rftable$byClass["Recall"],rftable$byClass["Precision"],rftable$byClass["F1"])
+```
+
+```{r boosting method, include=TRUE}
+# boosting
+boost <- boosting(Class ~ ., data = train)
+predboost <- predict(boost, train, type = "class")
+predboost$prob
+predboost$confusion
+predboost$error
+boostable<-confusionMatrix(as.factor(predboost$class), as.factor(train$Class))
+#Continue building rows for comparison table
+BOOMethod<-c(boostable$byClass["Recall"],boostable$byClass["Precision"],boostable$byClass["F1"])
+```
+
+
+
+```{r table of classifiers, include=TRUE}
+Stats.DF<-data.frame("Scores for support vector machine"=SVMMethod,"Scores for Naive Bayes"=NBMethod, "Scores for support decision trees"=TreeMethod,"Scores for LOOVC"=loovcMethod ,"Scores for Neural Network" = NNMethod,  "Scores for QDA"=QDAMethod,"Scores for RDA"=RDAMethod, "Scores for RF"=RFMethod,"Scores for Boosting"=BOOMethod) 
+Stats.DF #this table helps assess what models should be used for informing creation of stacked ensembles
+```
+
+```{r test combinations}
+#this is one technique for setting an ensemble. it is slightly more complicated and requires control mechanisms compared to majority vote. It does a good job at predicting, but it is tough to do a 1 to 1 comparison to other models unless every model is done with train controls as well. This model was included as an alternate possibility if majority vote has issues.
+#Set control
+control <- trainControl(method="repeatedcv", number=10, repeats=3, savePredictions=TRUE, classProbs=TRUE)
+#Pick algorithms based on criteria 
+#algorithms selected are done to maximize usefulness against training set
+algorithmList <- c('rpart', 'naive_bayes','nnet')
+set.seed(123)
+#Run combined algorithm
+models <- caretList(Class~., data=train, trControl=control, methodList=algorithmList)
+results <- resamples(models)
+#Summary of results for comparing to other models
+summary(results)
+```
+
+```{r majorityrulemethod}
+#sergios method
+combine.classes<-data.frame(myrf.pred, myrda.pred$class,
+mytree.pred,mynnet.pred,mysvm.pred, mynb.pred$class)
+combine.classes$myrf.pred<-ifelse(combine.classes$myrf.pred=="benign", 0, 1)
+combine.classes[,2]<-ifelse(combine.classes[,2]=="benign", 0, 1)
+combine.classes[,3]<-ifelse(combine.classes[,3]=="benign", 0, 1)
+combine.classes[,4]<-ifelse(combine.classes[,4]=="benign", 0, 1)
+combine.classes[,5]<-ifelse(combine.classes[,5]=="benign", 0, 1)
+combine.classes[,6]<-ifelse(combine.classes[,6]=="benign", 0, 1)
+majority.vote=rowSums(combine.classes)
+#head(majority.vote)
+combine.classes[,7]<-rowSums(combine.classes)
+combine.classes[,8]<-ifelse(combine.classes[,7]>=4, "malignant", "benign")
+table(combine.classes[,8], train$Class)
+mvtable<-confusionMatrix(as.factor(combine.classes[,8]), reference = as.factor(train$Class))
+MVMethod<-c(mvtable$byClass["Recall"],mvtable$byClass["Precision"],mvtable$byClass["F1"])
+MVMethod
+```
+
+```{r table of trained algorithms, include=TRUE}
+StatsTrain.DF<-data.frame("Scores for support vector machine"=SVMMethod,"Scores for Naive Bayes"=NBMethod, "Scores for support decision trees"=TreeMethod,"Scores for LOOVC"=loovcMethod ,"Scores for Neural Network" = NNMethod,  "Scores for QDA"=QDAMethod,"Scores for RDA"=RDAMethod, "Scores for RF"=RFMethod,"Scores for Boosting"=BOOMethod, "Scores for Majority Vote"=MVMethod) 
+StatsTrain.DF #use this to determine what to run against test classes
+```
+```{r testing, include=TRUE}
+#we will test Neural Network, RDA, Majority Vote 
+#Using Majority Vote means running multiple algorithms to create majority vote algorithm
+#SVM Testing for Majority Vote
+svmtest <- svm(Class ~ ., test)
+svmtest.pred <- predict(svmtest, test)
+#Naive Bayes Testing for Majority Vote
+tbtest <- NaiveBayes(Class ~ ., test)
+tbtest.pred <- predict(tbtest,test)
+#Neural Network for Majority Vote and comparison
+mytnnet <- nnet(Class ~ ., test, size=1)
+mytnnet.pred <- predict(mytnnet,test,type="class")
+#Build confusion matrix
+table(mytnnet.pred,test$Class)
+#Manual calculation of scores
+TPTN=as.numeric("191")
+FNTN=as.numeric("0")
+FPTN=as.numeric("0")
+TNTN=as.numeric("89")
+NNPrTN=(TPTN/(TPTN+FPTN))
+NNRTN = (TPTN/(TPTN+FNTN))
+NNFTN = (2*NNPrTN*NNRTN)/(NNPrTN+NNRTN)
+#Continue building rows for comparison table
+NNTNMethod<-c(NNRTN,NNPrTN,NNFTN)
+#RDA for Majority Vote and comparison
+testrda <- rda(Class ~ ., test)
+testrda.pred <- predict(testrda, test)
+#Build Confusion Matrix
+trdatable<-confusionMatrix(testrda.pred$class, reference = test$Class)
+#Continue building rows for comparison table
+RDATMethod<-c(trdatable$byClass["Recall"],trdatable$byClass["Precision"],trdatable$byClass["F1"])
+#RF for Majority Vote
+testrf <- randomForest(Class ~ .,test)
+testrf.pred <- predict(testrf, test)
+#loovc for Majority Vote
+anst <- numeric(length(test[,1]))
+for (i in 1:length(test[,1])) {
+  mytreet <- rpart(Class~ ., test[-i,])
+  mytreet.pred <- predict(mytreet,test[i,],type="class")
+  anst[i] <- mytreet.pred
+}
+anst <- factor(ans,labels=levels(test$Class))
+#majority vote
+combine.classes<-data.frame(testrf.pred, testrda.pred$class,
+mytreet.pred,mytnnet.pred,svmtest.pred, tbtest.pred$class)
+combine.classes$testrf.pred<-ifelse(combine.classes$testrf.pred=="benign", 0, 1)
+combine.classes[,2]<-ifelse(combine.classes[,2]=="benign", 0, 1)
+combine.classes[,3]<-ifelse(combine.classes[,3]=="benign", 0, 1)
+combine.classes[,4]<-ifelse(combine.classes[,4]=="benign", 0, 1)
+combine.classes[,5]<-ifelse(combine.classes[,5]=="benign", 0, 1)
+combine.classes[,6]<-ifelse(combine.classes[,6]=="benign", 0, 1)
+majority.vote=rowSums(combine.classes)
+#head(majority.vote)
+combine.classes[,7]<-rowSums(combine.classes)
+combine.classes[,8]<-ifelse(combine.classes[,7]>=4, "malignant", "benign")
+table(combine.classes[,8], test$Class)
+mvttable<-confusionMatrix(as.factor(combine.classes[,8]), reference = as.factor(test$Class))
+MVMTethod<-c(mvttable$byClass["Recall"],mvttable$byClass["Precision"],mvttable$byClass["F1"])
+MVMTethod
+```
+
+```{r finaltable, , include=TRUE}
+StatsFinal.DF<-data.frame("Scores for Train Neural Network" = NNMethod, "Scores for Test Neural Network" = NNTNMethod, "Scores for Test RDA"=RDATMethod, "Scores for Train RDA"=RDAMethod, "Scores for Train Majority Vote"=MVMethod, "Scores for Test Majority Vote"=MVMTethod) 
+StatsFinal.DF #This table will determine best algorithm
+#simple RDA performs well enough in comparison to Majority vote that gain by majority vote may not be worth effort. would need larger data set to determine
+#neural network learned data and overfit the test model. As neural network is a feeder for Majority vote, would have to reexamine majority vote algorithm choices
+```
+
+
